@@ -1,0 +1,208 @@
+
+#include <WiFi.h>
+#include <DHT.h>
+#include <WebSocketsServer.h>
+
+const char* ssid = "YOUR_WIFI_NAME";
+const char* password = "YOUR_WIFI_PASSWORD";
+
+#define DHTPIN 5
+#define DHTTYPE DHT11
+DHT dht(DHTPIN, DHTTYPE);
+
+const int Rled = 26;
+const int Gled = 17;
+const int Yled = 25;
+const int Bled = 19;
+
+WiFiServer server(80);
+WebSocketsServer webSocket(81);
+
+unsigned long lastUpdate = 0;
+
+// WEBPAGE
+const char webpage[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SMART IoT</title>
+
+<style>
+body{
+background:#0b1220;
+color:white;
+font-family:Arial;
+text-align:center;
+margin:0;
+padding:20px;
+}
+h1{color:#5eead4;font-size:30px}
+.card{
+background:#182438;
+padding:18px;
+margin:15px auto;
+border-radius:16px;
+max-width:400px;
+box-shadow:0 5px 20px #0005;
+}
+h2{color:#60a5fa;font-size:17px}
+.value{font-size:35px;font-weight:bold}
+button{
+border:0;
+padding:12px 22px;
+margin:6px;
+border-radius:9px;
+background:#0d9488;
+color:white;
+font-weight:bold;
+cursor:pointer;
+}
+button:active{background:#065f58}
+.status{color:#9ca3af;font-size:12px}
+</style>
+</head>
+
+<body>
+
+<h1>SMART IoT</h1>
+<p class="status">SMART CONTROL CENTER</p>
+
+<div class="card">
+<h2>HOME TEMP</h2>
+<div class="value"><span id="temp">--</span> °C</div>
+</div>
+
+<div class="card">
+<h2>HOME HUMIDITY</h2>
+<div class="value"><span id="hum">--</span> %</div>
+</div>
+
+<div class="card">
+<h2>LIGHT CONTROL</h2>
+
+<p>LIGHT 1</p>
+<button onclick="location.href='/red/on'">ON</button>
+<button onclick="location.href='/red/off'">OFF</button>
+
+<p>LIGHT 2</p>
+<button onclick="location.href='/green/on'">ON</button>
+<button onclick="location.href='/green/off'">OFF</button>
+
+<p>LIGHT 3</p>
+<button onclick="location.href='/yellow/on'">ON</button>
+<button onclick="location.href='/yellow/off'">OFF</button>
+
+<p>LIGHT 4</p>
+<button onclick="location.href='/blue/on'">ON</button>
+<button onclick="location.href='/blue/off'">OFF</button>
+</div>
+
+<p class="status">POWERED BY ESP32</p>
+
+<script>
+let socket=new WebSocket(
+'ws://'+location.hostname+':81/'
+);
+
+socket.onmessage=function(event){
+let v=event.data.split(',');
+document.getElementById('temp').innerHTML=v[0];
+document.getElementById('hum').innerHTML=v[1];
+};
+</script>
+
+</body>
+</html>
+)rawliteral";
+
+void setup(){
+
+Serial.begin(9600);
+
+pinMode(Rled,OUTPUT);
+pinMode(Gled,OUTPUT);
+pinMode(Yled,OUTPUT);
+pinMode(Bled,OUTPUT);
+
+dht.begin();
+
+WiFi.begin(ssid,password);
+
+while(WiFi.status()!=WL_CONNECTED){
+delay(500);
+Serial.println("Connecting WiFi...");
+}
+
+Serial.println("WiFi Connected");
+Serial.print("IP Address: ");
+Serial.println(WiFi.localIP());
+
+server.begin();
+webSocket.begin();
+
+}
+
+void loop(){
+
+webSocket.loop();
+
+// SENSOR UPDATE
+if(millis()-lastUpdate>=2000){
+
+lastUpdate=millis();
+
+float t=dht.readTemperature();
+float h=dht.readHumidity();
+
+if(!isnan(t)&&!isnan(h)){
+String data=String(t,1)+","+String(h,1);
+webSocket.broadcastTXT(data);
+}
+}
+
+// WEB SERVER
+WiFiClient client=server.available();
+
+if(client){
+
+String request=client.readStringUntil('\r');
+
+// LED CONTROL
+if(request.indexOf("/red/on")>=0)
+digitalWrite(Rled,HIGH);
+
+else if(request.indexOf("/red/off")>=0)
+digitalWrite(Rled,LOW);
+
+else if(request.indexOf("/green/on")>=0)
+digitalWrite(Gled,HIGH);
+
+else if(request.indexOf("/green/off")>=0)
+digitalWrite(Gled,LOW);
+
+else if(request.indexOf("/yellow/on")>=0)
+digitalWrite(Yled,HIGH);
+
+else if(request.indexOf("/yellow/off")>=0)
+digitalWrite(Yled,LOW);
+
+else if(request.indexOf("/blue/on")>=0)
+digitalWrite(Bled,HIGH);
+
+else if(request.indexOf("/blue/off")>=0)
+digitalWrite(Bled,LOW);
+
+// HTTP RESPONSE
+client.println("HTTP/1.1 200 OK");
+client.println("Content-Type: text/html");
+client.println("Connection: close");
+client.println();
+
+client.print((const __FlashStringHelper*)webpage);
+
+client.stop();
+
+}
+
+}
